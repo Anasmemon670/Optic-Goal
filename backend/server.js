@@ -2,7 +2,6 @@ const express = require('express');
 const cors = require('cors');
 const morgan = require('morgan');
 const dotenv = require('dotenv');
-const net = require('net');
 const connectDB = require('./src/config/database');
 
 // Load environment variables
@@ -66,19 +65,9 @@ mongoose.connection.once('open', async () => {
 const app = express();
 
 // Middleware - CORS Configuration
-// Explicit allowed origins for security and predictability
-const allowedOrigins = process.env.ALLOWED_ORIGINS
-  ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
-  : [
-      'http://localhost:3000',
-      'http://localhost:3001',
-      'http://127.0.0.1:3000',
-      'http://127.0.0.1:3001',
-    ];
-
-// Add production origins if provided
-if (process.env.FRONTEND_URL) {
-  allowedOrigins.push(process.env.FRONTEND_URL);
+const CORS_ORIGIN = process.env.CORS_ORIGIN;
+if (!CORS_ORIGIN) {
+  console.warn('[CORS] CORS_ORIGIN is not set. Browser requests may fail in production.');
 }
 
 app.use(cors({
@@ -87,19 +76,17 @@ app.use(cors({
     if (!origin) {
       return callback(null, true);
     }
-    
-    // Check if origin is in allowed list
-    if (allowedOrigins.indexOf(origin) !== -1) {
-      callback(null, true);
-    } else {
-      // In development, log warning but allow
-      if (process.env.NODE_ENV !== 'production') {
-        console.warn(`[CORS] Origin ${origin} not in allowed list, but allowing in development`);
-        callback(null, true);
-      } else {
-        callback(new Error('Not allowed by CORS'));
+
+    // Production: allow ONLY the configured frontend origin
+    if (process.env.NODE_ENV === 'production') {
+      if (CORS_ORIGIN && origin === CORS_ORIGIN) {
+        return callback(null, true);
       }
+      return callback(new Error('Not allowed by CORS'));
     }
+
+    // Development: allow all origins (no wildcard in production)
+    return callback(null, true);
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH', 'HEAD'],
@@ -188,168 +175,6 @@ app.use((req, res) => {
   });
 });
 
-// ============================================
-// PORT CONFIGURATION & SERVER STARTUP
-// ============================================
-
-// Port configuration: Use 5001 as default (Windows reserves port 5000 for HTTP.sys)
-// Can be overridden via PORT environment variable
-// This ensures backend runs on a safe port that doesn't conflict with Windows system services
-const PORT = parseInt(process.env.PORT, 10) || 5001;
-// Use 0.0.0.0 for production compatibility (allows external connections)
-// Use 127.0.0.1 for development (localhost only)
-const HOST = process.env.HOST || (process.env.NODE_ENV === 'production' ? '0.0.0.0' : '127.0.0.1');
-
-// Store server instance for graceful shutdown
-let server = null;
-
-/**
- * Check if a port is available
- * This prevents EACCES errors by detecting port conflicts before binding
- */
-function isPortAvailable(port, host) {
-  return new Promise((resolve) => {
-    const tester = net.createServer()
-      .once('error', (err) => {
-        if (err.code === 'EADDRINUSE' || err.code === 'EACCES') {
-          resolve(false);
-        } else {
-          resolve(false);
-        }
-      })
-      .once('listening', () => {
-        tester.once('close', () => resolve(true))
-          .close();
-      })
-      .listen(port, host);
-  });
-}
-
-/**
- * Start the server with proper error handling
- * This ensures only one server instance is created and handles all binding errors
- */
-async function startServer() {
-  try {
-    // Pre-start safety check: Verify port availability
-    console.log(`🔍 Checking if port ${PORT} is available on ${HOST}...`);
-    const portAvailable = await isPortAvailable(PORT, HOST);
-    
-    if (!portAvailable) {
-      console.error(`\n❌ ERROR: Port ${PORT} is already in use or permission denied!`);
-      console.error(`\n💡 Solutions:`);
-      console.error(`   1. Stop any other process using port ${PORT}`);
-      console.error(`   2. Check for duplicate Node.js/nodemon/PM2 instances: ps aux | grep node`);
-      console.error(`   3. On Windows: netstat -ano | findstr :${PORT}`);
-      console.error(`   4. Kill the process using: taskkill /PID <PID> /F (Windows)`);
-      console.error(`   5. Ensure you have permission to bind to port ${PORT}\n`);
-      process.exit(1);
-    }
-
-    console.log(`✅ Port ${PORT} is available`);
-
-    // Create server instance - this ensures only one listener exists
-    server = app.listen(PORT, HOST, () => {
-      console.log(`\n🚀 Backend running on http://localhost:${PORT}`);
-  console.log(`📡 Environment: ${process.env.NODE_ENV || 'development'}`);
-      console.log(`✅ Backend ready to accept connections\n`);
-    });
-
-    // Handle server-level errors (EACCES, EADDRINUSE, etc.)
-    server.on('error', (err) => {
-      if (err.code === 'EACCES') {
-        console.error(`\n❌ ERROR: Permission denied binding to port ${PORT}`);
-        console.error(`💡 You may need to run with elevated permissions or use a different port\n`);
-      } else if (err.code === 'EADDRINUSE') {
-        console.error(`\n❌ ERROR: Port ${PORT} is already in use`);
-        console.error(`💡 Another process is using this port. Please stop it first.\n`);
-      } else {
-        console.error(`\n❌ Server error:`, err);
-      }
-      process.exit(1);
-    });
-
-  } catch (error) {
-    console.error(`\n❌ Failed to start server:`, error);
-    process.exit(1);
-  }
-}
-
-/**
- * Graceful shutdown handler
- * Ensures port is released cleanly when server stops
- */
-function gracefulShutdown(signal) {
-  console.log(`\n🛑 Received ${signal}. Starting graceful shutdown...`);
-  
-  if (server) {
-    server.close(() => {
-      console.log('✅ HTTP server closed');
-      
-      // Close database connection
-      mongoose.connection.close(false, () => {
-        console.log('✅ MongoDB connection closed');
-        console.log('👋 Server shutdown complete');
-        process.exit(0);
-      });
-    });
-
-    // Force shutdown after 10 seconds
-    setTimeout(() => {
-      console.error('⚠️  Forced shutdown after timeout');
-      process.exit(1);
-    }, 10000);
-  } else {
-    process.exit(0);
-  }
-}
-
-// ============================================
-// PROCESS LIFECYCLE HANDLERS
-// ============================================
-
-/**
- * Handle unhandled promise rejections
- * Prevents server crashes from unhandled async errors
- */
-process.on('unhandledRejection', (err) => {
-  console.error('❌ Unhandled Promise Rejection:', err);
-  // In production, we might want to exit, but in dev we continue
-  if (process.env.NODE_ENV === 'production') {
-    gracefulShutdown('unhandledRejection');
-  }
-});
-
-/**
- * Handle uncaught exceptions
- * Critical errors that would crash the server
- * Exit gracefully to allow process managers to restart
- */
-process.on('uncaughtException', (err) => {
-  console.error('❌ Uncaught Exception:', err);
-  gracefulShutdown('uncaughtException');
-});
-
-/**
- * Handle SIGTERM (termination signal from process managers)
- * Allows clean shutdown when deployed (PM2, Docker, etc.)
- */
-process.on('SIGTERM', () => {
-  gracefulShutdown('SIGTERM');
-});
-
-/**
- * Handle SIGINT (Ctrl+C)
- * Allows clean shutdown during development
- */
-process.on('SIGINT', () => {
-  gracefulShutdown('SIGINT');
-});
-
-// ============================================
-// START THE SERVER
-// ============================================
-
-// Start server only after all handlers are registered
-// This ensures proper error handling from the start
-startServer();
+// Export Express app for Vercel (no manual port binding in serverless runtime)
+module.exports = app;
+module.exports.default = app;

@@ -4,8 +4,8 @@ const axios = require('axios');
 // Using V1 API format for simplicity
 const SPORTS_DB_BASE_URL = 'https://www.thesportsdb.com/api/v1/json';
 
-// Optional API key from environment (for higher rate limits)
-const API_KEY = process.env.THE_SPORTS_DB_KEY || '1'; // Default to '1' for free tier
+// API key from environment (must be configured in production)
+const API_KEY = process.env.THE_SPORTS_DB_KEY;
 
 // Create axios instance
 const sportsDBClient = axios.create({
@@ -39,6 +39,14 @@ const handleError = (error, context) => {
  */
 const fetchTeams = async (query, sport = 'soccer') => {
   try {
+    if (!API_KEY) {
+      return {
+        success: false,
+        message: 'THE_SPORTS_DB_KEY is not configured',
+        data: [],
+      };
+    }
+
     let endpoint = '';
     
     // If query is a number, treat as league ID
@@ -82,6 +90,14 @@ const fetchTeams = async (query, sport = 'soccer') => {
  */
 const fetchTeamDetails = async (teamId) => {
   try {
+    if (!API_KEY) {
+      return {
+        success: false,
+        message: 'THE_SPORTS_DB_KEY is not configured',
+        data: null,
+      };
+    }
+
     const endpoint = `/${API_KEY}/lookupteam.php?id=${teamId}`;
     const response = await sportsDBClient.get(endpoint);
     
@@ -108,6 +124,14 @@ const fetchTeamDetails = async (teamId) => {
  */
 const fetchLeagues = async (country = null, sport = null) => {
   try {
+    if (!API_KEY) {
+      return {
+        success: false,
+        message: 'THE_SPORTS_DB_KEY is not configured',
+        data: [],
+      };
+    }
+
     let endpoint = '';
     
     if (country) {
@@ -150,6 +174,14 @@ const fetchLeagues = async (country = null, sport = null) => {
  */
 const fetchLeagueDetails = async (leagueId) => {
   try {
+    if (!API_KEY) {
+      return {
+        success: false,
+        message: 'THE_SPORTS_DB_KEY is not configured',
+        data: null,
+      };
+    }
+
     const endpoint = `/${API_KEY}/lookupleague.php?id=${leagueId}`;
     const response = await sportsDBClient.get(endpoint);
     

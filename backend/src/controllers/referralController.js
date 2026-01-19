@@ -35,7 +35,11 @@ const getReferralCode = async (req, res) => {
       await user.save();
     }
 
-    const referralLink = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/register?ref=${user.referralCode}`;
+    const frontendUrl = process.env.CORS_ORIGIN;
+    if (!frontendUrl) {
+      return sendError(res, 'Frontend URL is not configured (set CORS_ORIGIN)', 500);
+    }
+    const referralLink = `${frontendUrl}/register?ref=${user.referralCode}`;
 
     // Get referral stats
     const totalReferrals = await Referral.countDocuments({ referrerId: userId });

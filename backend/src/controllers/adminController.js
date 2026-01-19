@@ -67,7 +67,7 @@ const getAdminInfo = async (req, res) => {
       success: true,
       data: {
         user: {
-          email: process.env.ADMIN_EMAIL || 'admin@example.com',
+          email: process.env.ADMIN_EMAIL,
           role: 'admin',
         },
       },

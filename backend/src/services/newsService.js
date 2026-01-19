@@ -10,7 +10,7 @@ const News = require('../models/News');
 const mongoose = require('mongoose');
 
 // Configuration from environment
-const NEWS_API_KEY_1 = process.env.NEWS_API_KEY_1 || '';
+const NEWS_API_KEY_1 = process.env.NEWS_API_KEY_1;
 const TRT_RSS_URL = process.env.TRT_RSS_URL || 'https://www.trthaber.com/spor_articles.rss';
 const NEWS_CACHE_TTL = parseInt(process.env.NEWS_CACHE_TTL || '300', 10); // seconds
 

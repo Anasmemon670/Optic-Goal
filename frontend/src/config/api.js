@@ -8,8 +8,8 @@
  * - Common request utilities
  */
 
-// API Base URL - can be overridden via environment variable
-export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001';
+// API Base URL - MUST come from Vite env var in production
+export const API_BASE_URL = import.meta.env.VITE_API_URL;
 
 // API endpoints - all endpoints should start with /api
 export const API_ENDPOINTS = {

@@ -51,13 +51,13 @@ const verifyAdminAuth = async (req, res, next) => {
     if (decoded.userId === 'admin') {
       req.user = {
         _id: 'admin',
-        email: process.env.ADMIN_EMAIL || 'admin@example.com',
+        email: process.env.ADMIN_EMAIL,
         role: 'admin',
         name: 'Admin',
         isAdmin: () => true,
       };
       req.admin = {
-        email: process.env.ADMIN_EMAIL || 'admin@example.com',
+        email: process.env.ADMIN_EMAIL,
         role: 'admin',
       };
       return next();

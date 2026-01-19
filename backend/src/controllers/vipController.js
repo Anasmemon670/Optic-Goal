@@ -292,8 +292,11 @@ const createSession = async (req, res) => {
       return sendConflict(res, 'You already have an active VIP membership');
     }
 
-    // Get frontend URL for redirects
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    // Get frontend URL for redirects (must come from env)
+    const frontendUrl = process.env.CORS_ORIGIN;
+    if (!frontendUrl) {
+      return sendError(res, 'Frontend URL is not configured (set CORS_ORIGIN)', 500);
+    }
 
     // Create Stripe Checkout Session if Stripe is configured
     if (paymentMethod === 'stripe' && stripe) {
