@@ -50,7 +50,9 @@ export default defineConfig({
   },
   build: {
     target: 'esnext',
-    outDir: 'build',
+    // Vercel (and most static hosts) expect Vite output in `dist/` by default.
+    // Keeping the default avoids "No Output Directory named dist" deployment errors.
+    outDir: 'dist',
   },
   server: {
     port: 3000,
