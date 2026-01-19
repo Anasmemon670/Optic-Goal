@@ -52,6 +52,7 @@ export default function App() {
   const [isVIP, setIsVIP] = useState(false);
   const [language, setLanguage] = useState('en');
   const [isVerifying, setIsVerifying] = useState(true);
+  const [aiOpenRequestId, setAiOpenRequestId] = useState(0);
   const isLoggingOutRef = useRef(false);
 
   // Handle page changes with scroll to top and URL update
@@ -62,6 +63,9 @@ export default function App() {
     window.history.pushState({}, '', url);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
+
+  // Robust open signal for AI Assistant (avoids relying on DOM events)
+  const openAIAssistant = () => setAiOpenRequestId((v) => v + 1);
 
   // Initialize page from URL on mount
   useEffect(() => {
@@ -327,7 +331,7 @@ export default function App() {
     // (redirects are handled in useEffect above)
     const token = getToken();
     if ((pagePath === 'profile' || pagePath === 'settings' || pagePath === 'notifications') && !isAuthenticated && !token) {
-      return <Home setCurrentPage={handlePageChange} showAds={showAds} />;
+      return <Home setCurrentPage={handlePageChange} showAds={showAds} openAIAssistant={openAIAssistant} />;
     }
 
     // Check admin access for admin pages
@@ -335,7 +339,7 @@ export default function App() {
       const storedUser = getUser();
       const userIsAdmin = isAdmin || storedUser?.role === 'admin';
       if (!userIsAdmin || !token || !isAuthenticated) {
-        return <Home setCurrentPage={handlePageChange} showAds={showAds} />;
+        return <Home setCurrentPage={handlePageChange} showAds={showAds} openAIAssistant={openAIAssistant} />;
       }
     }
 
@@ -344,13 +348,13 @@ export default function App() {
       const loginStoredUser = getUser();
       const loginUserIsAdmin = isAdmin || loginStoredUser?.role === 'admin';
       if (loginUserIsAdmin && token && isAuthenticated) {
-        return <Home setCurrentPage={handlePageChange} showAds={showAds} />;
+        return <Home setCurrentPage={handlePageChange} showAds={showAds} openAIAssistant={openAIAssistant} />;
       }
     }
 
     switch (pagePath) {
       case 'home':
-        return <Home setCurrentPage={handlePageChange} showAds={showAds} />;
+        return <Home setCurrentPage={handlePageChange} showAds={showAds} openAIAssistant={openAIAssistant} />;
       case 'predictions':
         return <Predictions isAuthenticated={isAuthenticated} isVIP={isVIP} showAds={showAds} />;
       case 'bulletin': {
@@ -379,7 +383,7 @@ export default function App() {
       case 'notifications':
         return <Notifications openAuthModal={openAuthModal} />;
       default:
-        return <Home setCurrentPage={handlePageChange} showAds={showAds} />;
+        return <Home setCurrentPage={handlePageChange} showAds={showAds} openAIAssistant={openAIAssistant} />;
     }
   };
 
@@ -439,6 +443,7 @@ export default function App() {
             isAuthenticated={isAuthenticated}
             isVIP={isVIP}
             isVerifying={isVerifying}
+            openRequestId={aiOpenRequestId}
           />
         </ErrorBoundary>
       )}

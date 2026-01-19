@@ -31,8 +31,9 @@ const aiRequestLogSchema = new mongoose.Schema({
   },
   sport: {
     type: String,
-    enum: ['football', 'basketball'],
-    default: null,
+    // Allow non-sports / platform-guide requests to be logged without failing validation
+    enum: ['football', 'basketball', 'general'],
+    default: 'general',
   },
   isVIP: {
     type: Boolean,

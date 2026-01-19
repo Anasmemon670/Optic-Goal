@@ -358,10 +358,18 @@ const fetchLeaguesAndStandings = async () => {
       let saved = 0;
       for (const league of footballLeaguesResult.data) {
         try {
+          const leagueId = league.league?.id;
+          if (!leagueId) continue;
           await FootballLeague.findOneAndUpdate(
-            { 'league.id': league.league?.id },
-            { league: league.league, country: league.country, seasons: league.seasons },
-            { upsert: true, new: true }
+            { league_id: leagueId },
+            {
+              league_id: leagueId,
+              league: league.league,
+              country: league.country,
+              seasons: Array.isArray(league.seasons) ? league.seasons : [],
+            },
+            // Run validators so we never insert null/invalid unique keys
+            { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true }
           );
           saved++;
         } catch (error) {
@@ -377,10 +385,23 @@ const fetchLeaguesAndStandings = async () => {
       let saved = 0;
       for (const league of basketballLeaguesResult.data) {
         try {
+          const leagueId = league?.id;
+          if (!leagueId) continue;
           await BasketballLeague.findOneAndUpdate(
-            { 'league.id': league.id },
-            { league: league, country: league.country },
-            { upsert: true, new: true }
+            { league_id: leagueId },
+            {
+              league_id: leagueId,
+              league: {
+                id: league.id,
+                name: league.name,
+                type: league.type,
+                logo: league.logo,
+              },
+              country: league.country,
+              seasons: Array.isArray(league.seasons) ? league.seasons : [],
+            },
+            // Run validators so we never insert null/invalid unique keys
+            { upsert: true, new: true, runValidators: true, setDefaultsOnInsert: true }
           );
           saved++;
         } catch (error) {

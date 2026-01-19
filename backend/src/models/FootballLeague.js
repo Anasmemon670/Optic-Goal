@@ -10,7 +10,9 @@ const footballLeagueSchema = new mongoose.Schema({
   league: {
     id: Number,
     name: String,
-    type: String,
+    // IMPORTANT: this key is named "type", so it must be wrapped
+    // otherwise Mongoose treats the whole `league` path as a String schema type.
+    type: { type: String },
     logo: String,
   },
   country: {

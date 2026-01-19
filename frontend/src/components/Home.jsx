@@ -5,7 +5,7 @@ import { BannerAd, SidebarAd } from './GoogleAds';
 import { API_BASE_URL, API_ENDPOINTS, apiGet } from '../config/api';
 import logoImage from '../assets/logo.png';
 
-export function Home({ setCurrentPage, showAds = false }) {
+export function Home({ setCurrentPage, showAds = false, openAIAssistant }) {
   const [liveMatches, setLiveMatches] = useState([]);
   const [upcomingMatches, setUpcomingMatches] = useState([]);
   const [featuredSports, setFeaturedSports] = useState([]);
@@ -241,8 +241,14 @@ export function Home({ setCurrentPage, showAds = false }) {
             >
               <motion.button
                 onClick={() => {
-                  // Dispatch custom event to open AI Assistant
-                  window.dispatchEvent(new CustomEvent('openAIAssistant'));
+                  // Prefer direct prop callback (most reliable). Fallback to DOM event for safety.
+                  if (typeof openAIAssistant === 'function') {
+                    openAIAssistant();
+                    return;
+                  }
+                  const evt = new CustomEvent('openAIAssistant', { bubbles: true, composed: true });
+                  document.dispatchEvent(evt);
+                  window.dispatchEvent(evt);
                 }}
                 className="group relative p-6 bg-gradient-to-br from-green-600/20 to-green-700/20 backdrop-blur-sm rounded-2xl border-2 border-green-500/50 hover:border-green-400 transition-all cursor-pointer"
                 whileHover={{ scale: 1.05, y: -5 }}

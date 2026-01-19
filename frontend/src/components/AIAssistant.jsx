@@ -4,7 +4,7 @@ import { MessageCircle, X, Send, Bot, BarChart3, TrendingUp, Users, Target, Wifi
 import { API_BASE_URL, API_ENDPOINTS, apiGet, apiPost } from '../config/api';
 import { getToken } from '../utils/auth';
 
-export function AIAssistant({ isAuthenticated, isVIP, isVerifying = false }) {
+export function AIAssistant({ isAuthenticated, isVIP, isVerifying = false, openRequestId = 0 }) {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState([]);
   const [inputMessage, setInputMessage] = useState('');
@@ -19,6 +19,15 @@ export function AIAssistant({ isAuthenticated, isVIP, isVerifying = false }) {
   const inputRef = useRef(null);
   const hasInitializedRef = useRef(false);
   const eventListenerRef = useRef(null);
+
+  // Direct open signal from App (most reliable)
+  useEffect(() => {
+    if (openRequestId > 0) {
+      setHasError(false);
+      setError(null);
+      setIsOpen(true);
+    }
+  }, [openRequestId]);
 
   // Listen for custom event to open AI Assistant from homepage
   // CRITICAL: This must always be mounted and active, even during verification
@@ -116,7 +125,7 @@ export function AIAssistant({ isAuthenticated, isVIP, isVerifying = false }) {
             setMessages([{
               id: Date.now(),
               type: 'bot',
-              text: `👋 Hello! I'm your AI Assistant for OptikGoal!\n\n✨ I can help you with:\n• Understanding predictions and match analysis\n• Platform features and navigation\n• Live match information\n• VIP membership benefits\n• Web analytics and insights\n\n💡 Try asking me:\n"Tell me about predictions"\n"What are live matches?"\n"Explain VIP features"\n\nI'm here 24/7 to assist you! How can I help today?`,
+              text: `👋 Hello! I'm your AI Assistant for OptikGoal!\n\n✨ I can help you with:\n• Platform features and navigation\n• Understanding predictions and match analysis\n• Live match information\n• Web analytics and insights\n\n💡 Try asking me:\n"Where do I see live matches?"\n"Tell me about predictions"\n"Where is the Bulletin page?"\n\nHow can I help today?`,
               timestamp: new Date(),
             }]);
             hasInitializedRef.current = true;
@@ -208,9 +217,17 @@ export function AIAssistant({ isAuthenticated, isVIP, isVerifying = false }) {
         API_ENDPOINTS.AI.CHAT,
         {
           message: currentInput,
+          // Send a small amount of recent conversation so the AI can avoid repeating itself
+          // and keep continuity within the same session.
+          conversation: messages
+            .filter((m) => !m?.isError && (m?.type === 'user' || m?.type === 'bot') && typeof m?.text === 'string')
+            .slice(-6)
+            .map((m) => ({
+              role: m.type === 'user' ? 'user' : 'assistant',
+              content: m.text,
+            })),
           context: {
             isAuthenticated: isAuthenticated || false,
-            isVIP: isVIP || false,
           },
         },
         token
@@ -243,7 +260,7 @@ export function AIAssistant({ isAuthenticated, isVIP, isVerifying = false }) {
       } else {
         // Handle error response - check if it's a quota error
         if (result?.status === 429 || result?.message?.includes('limit') || result?.message?.includes('quota')) {
-          throw new Error('🚫 Your daily AI search limit has been reached. Upgrade to VIP for unlimited access!');
+          throw new Error('🚫 Your daily AI limit has been reached. Please try again tomorrow.');
         }
         throw new Error(result?.message || 'Failed to get response');
       }
@@ -254,9 +271,9 @@ export function AIAssistant({ isAuthenticated, isVIP, isVerifying = false }) {
       let errorText = '⚠️ Sorry, I encountered an error. Please try again.';
       
       if (error?.message?.includes('limit') || error?.message?.includes('quota')) {
-        errorText = '🚫 Your daily AI search limit has been reached. Upgrade to VIP for unlimited access!';
+        errorText = '🚫 Your daily AI limit has been reached. Please try again tomorrow.';
       } else if (error?.message?.includes('429')) {
-        errorText = '🚫 Daily limit reached! Upgrade to VIP for unlimited AI searches.';
+        errorText = '🚫 Daily limit reached. Please try again tomorrow.';
       } else if (error?.message?.includes('network') || error?.message?.includes('fetch') || error?.message?.includes('CONNECTION_REFUSED') || error?.message?.includes('Failed to fetch')) {
         errorText = '🌐 Backend server is not running. Please start the backend server on port 5001 to use AI Assistant.';
       }
@@ -285,7 +302,7 @@ export function AIAssistant({ isAuthenticated, isVIP, isVerifying = false }) {
     { text: 'Tell me about predictions', icon: Target },
     { text: 'Show web analytics', icon: BarChart3 },
     { text: 'What are live matches?', icon: TrendingUp },
-    { text: 'Explain VIP features', icon: Users },
+    { text: 'How do I use the site?', icon: HelpCircle },
   ];
 
   const handleQuickAction = (text) => {
@@ -320,7 +337,9 @@ export function AIAssistant({ isAuthenticated, isVIP, isVerifying = false }) {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setIsOpen(false)}
-              className="fixed inset-0 bg-black/20 sm:bg-black/30 z-[9999]"
+              className="fixed inset-0 bg-black/20 sm:bg-black/30"
+              // Use max-ish z-index to stay above any overlays/ads
+              style={{ zIndex: 2147483646 }}
             />
             
             {/* Chat Window - Professional Floating Widget */}
@@ -347,8 +366,22 @@ export function AIAssistant({ isAuthenticated, isVIP, isVerifying = false }) {
                 mass: 0.6
               }}
               onClick={(e) => e.stopPropagation()}
-              className="fixed bottom-4 right-4 sm:bottom-6 sm:right-6 w-[calc(100vw-2rem)] sm:w-[360px] md:w-[380px] max-w-[380px] h-[calc(100vh-6rem)] sm:h-[600px] max-h-[600px] bg-gradient-to-b from-gray-900 to-gray-950 rounded-3xl shadow-2xl flex flex-col border border-gray-700/40 overflow-hidden z-[10000]"
+              className="fixed bg-gradient-to-b from-gray-900 to-gray-950 rounded-3xl shadow-2xl flex flex-col border border-gray-700/40 overflow-hidden"
               style={{
+                // Use max-ish z-index to stay above any overlays/ads
+                zIndex: 2147483647,
+                // Tailwind build in this project is missing bottom-* utilities (only bottom-0 exists),
+                // so we force positioning/sizing with inline styles to guarantee visibility.
+                right: 16,
+                bottom: 16,
+                width: 'min(380px, calc(100vw - 2rem))',
+                height: 'min(600px, calc(100vh - 6rem))',
+                // Solid background so page doesn't show through
+                backgroundImage: 'none',
+                backgroundColor: 'rgba(3, 7, 18, 0.96)',
+                borderWidth: 1,
+                borderStyle: 'solid',
+                borderColor: 'rgba(34, 197, 94, 0.18)',
                 boxShadow: '0 25px 60px -15px rgba(0, 0, 0, 0.9), 0 0 0 1px rgba(34, 197, 94, 0.2), 0 0 50px rgba(34, 197, 94, 0.15)',
               }}
             >
@@ -382,7 +415,7 @@ export function AIAssistant({ isAuthenticated, isVIP, isVerifying = false }) {
                       {quotaInfo && !isVIP && quotaInfo.remaining !== 'unlimited' && (
                         <span className="text-green-100/80 ml-1">• {quotaInfo.remaining} left</span>
                       )}
-                      {isVIP && <span className="ml-1 text-amber-300">✨ VIP</span>}
+                      {/* VIP badge intentionally hidden (non‑VIP assistant mode) */}
                     </p>
                   </div>
                 </div>
@@ -423,7 +456,14 @@ export function AIAssistant({ isAuthenticated, isVIP, isVerifying = false }) {
                   minHeight: 0,
                   scrollbarWidth: 'thin',
                   scrollbarColor: '#22c55e #1f2937',
-                  WebkitOverflowScrolling: 'touch'
+                  WebkitOverflowScrolling: 'touch',
+                  // Make background solid (avoid page background bleeding through)
+                  backgroundImage: 'none',
+                  backgroundColor: 'rgba(3, 7, 18, 0.94)',
+                  paddingLeft: 16,
+                  paddingRight: 16,
+                  paddingTop: 16,
+                  paddingBottom: 16,
                 }}
               >
                 {/* Error Banner */}
@@ -485,31 +525,54 @@ export function AIAssistant({ isAuthenticated, isVIP, isVerifying = false }) {
                     className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'} w-full`}
                   >
                     <div
-                      className={`max-w-[82%] sm:max-w-[75%] rounded-2xl px-3.5 py-2.5 shadow-md ${
+                      className={`rounded-2xl shadow-md ${
                         message.type === 'user'
                           ? 'bg-gradient-to-br from-green-500 via-green-600 to-green-700 text-white rounded-br-md'
                           : message.isError
-                          ? 'bg-red-900/50 text-red-100 border border-red-600/60 rounded-bl-md'
-                          : 'bg-gray-800/90 text-gray-50 border border-gray-700/60 rounded-bl-md backdrop-blur-sm'
+                          // NOTE: this project’s generated Tailwind CSS is missing many /90 + gray-50 utilities,
+                          // so we stick to utilities that exist in src/index.css.
+                          ? 'bg-red-500/20 text-white border border-red-500 rounded-bl-md'
+                          : 'bg-gray-800/50 text-white border border-gray-700/50 rounded-bl-md backdrop-blur-sm'
                       }`}
                       style={{
                         wordBreak: 'break-word',
                         overflowWrap: 'break-word',
+                        // Tailwind in this project misses many half-step utilities (px-3.5, mb-1.5, gap-1.5, etc).
+                        // Force spacing so text stays INSIDE the bubble.
+                        boxSizing: 'border-box',
+                        overflow: 'hidden',
+                        maxWidth: '82%',
+                        padding: '12px 14px',
                         boxShadow: message.type === 'user' 
                           ? '0 4px 12px rgba(34, 197, 94, 0.25)' 
-                          : '0 2px 8px rgba(0, 0, 0, 0.3)'
+                          : '0 2px 8px rgba(0, 0, 0, 0.3)',
+                        // Force readable bubble backgrounds even if some Tailwind utilities are missing
+                        ...(message.type !== 'user'
+                          ? {
+                              borderWidth: 1,
+                              borderStyle: 'solid',
+                              borderColor: message.isError ? 'rgba(239, 68, 68, 0.55)' : 'rgba(107, 114, 128, 0.45)',
+                              backgroundColor: message.isError ? 'rgba(127, 29, 29, 0.35)' : 'rgba(17, 24, 39, 0.75)',
+                            }
+                          : {}),
                       }}
                     >
                       {message.type === 'bot' && !message.isError && (
-                        <div className="flex items-center gap-1.5 mb-1.5">
-                          <Bot className="w-3.5 h-3.5 text-green-400 flex-shrink-0" />
-                          <span className="text-[11px] text-gray-300 font-semibold uppercase tracking-wide">AI</span>
+                        <div className="flex items-center gap-2 mb-2">
+                          <Bot className="w-4 h-4 text-green-400 flex-shrink-0" />
+                          <span className="text-xs text-gray-300 font-semibold uppercase tracking-wide">AI</span>
                         </div>
                       )}
-                      <p className="text-[13px] sm:text-sm leading-relaxed whitespace-pre-wrap break-words" style={{ lineHeight: '1.6' }}>
+                      <p
+                        className="leading-relaxed whitespace-pre-wrap break-words text-white"
+                        style={{ lineHeight: '1.65', fontSize: 13 }}
+                      >
                         {message.text}
                       </p>
-                      <span className={`text-[10px] opacity-50 mt-1.5 block ${message.type === 'user' ? 'text-right' : 'text-left'}`}>
+                      <span
+                        className={`opacity-60 mt-2 block text-gray-300 ${message.type === 'user' ? 'text-right' : 'text-left'}`}
+                        style={{ fontSize: 10 }}
+                      >
                         {new Date(message.timestamp).toLocaleTimeString([], {
                           hour: '2-digit',
                           minute: '2-digit',
@@ -526,7 +589,15 @@ export function AIAssistant({ isAuthenticated, isVIP, isVerifying = false }) {
                     animate={{ opacity: 1, y: 0 }}
                     className="flex justify-start"
                   >
-                    <div className="bg-gray-800/90 rounded-2xl rounded-bl-md px-4 py-3 border border-gray-700/60 flex items-center gap-2.5 shadow-md backdrop-blur-sm">
+                    <div
+                      className="bg-gray-800/50 rounded-2xl rounded-bl-md px-4 py-3 border border-gray-700/50 flex items-center gap-2.5 shadow-md backdrop-blur-sm"
+                      style={{
+                        backgroundColor: 'rgba(17, 24, 39, 0.75)',
+                        borderColor: 'rgba(107, 114, 128, 0.45)',
+                        borderWidth: 1,
+                        borderStyle: 'solid',
+                      }}
+                    >
                       <div className="flex gap-1.5">
                         <div className="w-2 h-2 bg-green-400 rounded-full animate-bounce shadow-sm" style={{ animationDelay: '0ms' }} />
                         <div className="w-2 h-2 bg-green-400 rounded-full animate-bounce shadow-sm" style={{ animationDelay: '150ms' }} />
@@ -594,7 +665,7 @@ export function AIAssistant({ isAuthenticated, isVIP, isVerifying = false }) {
                       className="text-green-400 hover:text-green-300 underline underline-offset-2 focus:outline-none focus:ring-2 focus:ring-green-500 rounded cursor-pointer font-medium"
                     >
                       Login
-                    </button> for VIP features
+                    </button> to access account pages (Profile/Settings/Notifications)
                   </p>
                 )}
               </form>
@@ -610,7 +681,13 @@ export function AIAssistant({ isAuthenticated, isVIP, isVerifying = false }) {
           animate={{ scale: 1, opacity: 1 }}
           exit={{ scale: 0, opacity: 0 }}
           transition={{ duration: 0.3, ease: 'easeOut' }}
-          className="fixed right-4 bottom-4 sm:right-6 sm:bottom-6 z-[9999]"
+          className="fixed"
+          // Use max-ish z-index to stay above any overlays/ads
+          style={{
+            zIndex: 2147483647,
+            right: 16,
+            bottom: 16,
+          }}
         >
           <motion.button
             whileHover={{ scale: 1.1 }}

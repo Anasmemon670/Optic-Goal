@@ -31,7 +31,8 @@ const basketballLiveMatchSchema = new mongoose.Schema({
   league: {
     id: Number,
     name: String,
-    type: String,
+    // IMPORTANT: wrap "type" or Mongoose may treat `league` as a String type
+    type: { type: String },
     logo: String,
     country: {
       id: Number,

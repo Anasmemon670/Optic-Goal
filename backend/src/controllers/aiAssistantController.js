@@ -21,6 +21,34 @@ const { generatePredictionForFixture } = require('../services/predictionEngine')
  * Available to all users (not just VIP)
  */
 
+// Basic VIP-topic detector: we intentionally avoid discussing VIP details.
+const isVipTopic = (text = '') => {
+  const msg = String(text || '').toLowerCase();
+  return (
+    msg.includes('vip') ||
+    msg.includes('premium') ||
+    msg.includes('subscription') ||
+    msg.includes('pricing') ||
+    msg.includes('price') ||
+    msg.includes('plan') ||
+    msg.includes('upgrade') ||
+    msg.includes('membership')
+  );
+};
+
+// Non-VIP platform context passed to the AI model for "website Q&A"
+const PLATFORM_CONTEXT = `OptikGoal site map (non‑VIP):
+- Home: Overview + entry points to key sections (live matches, predictions, AI assistant).
+- Predictions: Public predictions feed and match insights.
+- Bulletin: Browse match bulletin / match board information.
+- Live Scores: Live football and basketball scores.
+- Community: Discussions/comments.
+- News: Articles feed.
+- Profile / Settings / Notifications: Account pages (may require login).
+- Admin: Admin login/dashboard (restricted).
+
+Answer website questions by pointing to the exact navbar names and giving step-by-step guidance.`;
+
 // Get web analytics and insights
 const getWebAnalytics = async (req, res) => {
   try {
@@ -86,7 +114,10 @@ const chat = async (req, res) => {
   let errorMessage = null;
 
   try {
-    const { message, matchId, sport = 'football' } = req.body;
+    const { message, matchId, sport = 'football', conversation } = req.body;
+    // Normalize sport for runtime logic + logging (avoid null enum issues)
+    const sportType = sport === 'basketball' ? 'basketball' : 'football';
+    const logSport = sport === 'football' || sport === 'basketball' ? sport : 'general';
     const userIP = req.ip || req.connection.remoteAddress || 'unknown';
 
     if (!message || typeof message !== 'string' || message.trim().length === 0) {
@@ -94,6 +125,58 @@ const chat = async (req, res) => {
     }
 
     const userMessage = message.trim();
+
+    // Sanitize/limit conversation history (optional)
+    const safeConversation = Array.isArray(conversation)
+      ? conversation
+          .slice(-8)
+          .map((m) => ({
+            role: m?.role === 'assistant' ? 'assistant' : 'user',
+            content: String(m?.content || '').slice(0, 1500),
+          }))
+          .filter((m) => m.content.trim().length > 0)
+      : null;
+
+    // VIP topic policy: do not provide VIP details (but still help with general navigation)
+    if (isVipTopic(userMessage)) {
+      const safeResponse =
+        `I can help you with OptikGoal’s general (non‑VIP) features and navigation, but I can’t help with VIP/premium topics.\n\n` +
+        `Try asking:\n` +
+        `- "Where do I see live matches?"\n` +
+        `- "How do predictions work?"\n` +
+        `- "Where is the Bulletin page?"\n` +
+        `- "How do I login or create an account?"`;
+
+      // Log but don't consume quota for a blocked VIP-topic request
+      try {
+        await AIRequestLog.create({
+          userId,
+          userIP,
+          message: userMessage,
+          responseLength: safeResponse.length,
+          sport: logSport,
+          isVIP,
+          success: true,
+          processingTime: Date.now() - startTime,
+        });
+      } catch (logError) {
+        console.error('[AIAssistant] Error logging VIP-topic request:', logError);
+      }
+
+      return sendSuccess(
+        res,
+        {
+          response: safeResponse,
+          context: {
+            totalUsers: 0,
+            totalPredictions: 0,
+            liveMatches: 0,
+          },
+          usage: null,
+        },
+        'AI response generated (VIP topics blocked)'
+      );
+    }
 
     // Check user authentication (optional - AI is open to all)
     try {
@@ -170,6 +253,7 @@ const chat = async (req, res) => {
           userId,
           userIP,
           message: userMessage,
+          sport: logSport,
           isVIP: false,
           success: false,
           errorMessage: 'Quota exceeded',
@@ -178,7 +262,7 @@ const chat = async (req, res) => {
         
         return sendError(
           res,
-          'Your daily AI search limit has been reached. Upgrade to VIP for unlimited access.',
+          'Your daily AI limit has been reached. Please try again tomorrow.',
           429
         );
       }
@@ -196,6 +280,8 @@ const chat = async (req, res) => {
       totalPredictions: await Prediction.countDocuments({ isPublic: true }),
       liveFootball: await FootballLiveMatch.countDocuments(),
       liveBasketball: await BasketballLiveMatch.countDocuments(),
+      platformContext: PLATFORM_CONTEXT,
+      conversation: safeConversation,
     };
 
     // Check if user is asking about a specific match
@@ -302,7 +388,7 @@ Please try your question again or provide more specific details.`;
         message: userMessage,
         responseLength: response.length,
         matchId: extractedMatchId,
-        sport: extractedMatchId ? sport : null,
+        sport: extractedMatchId ? sportType : 'general',
         isVIP,
         success: true,
         processingTime,
@@ -339,6 +425,7 @@ Please try your question again or provide more specific details.`;
         userId,
         userIP: req.ip || req.connection.remoteAddress || 'unknown',
         message: req.body?.message || '',
+        sport: logSport,
         isVIP,
         success: false,
         errorMessage: error.message,
@@ -470,7 +557,7 @@ const predictMatch = async (req, res) => {
         
         return sendError(
           res,
-          'Your daily AI search limit has been reached. Upgrade to VIP for unlimited access.',
+          'Your daily AI limit has been reached. Please try again tomorrow.',
           429
         );
       }

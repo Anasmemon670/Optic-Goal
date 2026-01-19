@@ -50,15 +50,18 @@ const generateAIResponse = async (userMessage, context = {}) => {
       return generateFallbackResponse(userMessage, context);
     }
     
-    // Ensure response includes key elements (explanation, confidence, disclaimer)
-    // If response seems incomplete, append standard disclaimer
-    const responseLower = aiResponse.toLowerCase();
-    const hasConfidence = responseLower.includes('confidence') || responseLower.includes('%');
-    const hasDisclaimer = responseLower.includes('disclaimer') || responseLower.includes('risk') || responseLower.includes('guarantee');
-    
-    // If missing key elements, append them
-    if (!hasDisclaimer) {
-      aiResponse += '\n\n⚠️ **Risk Disclaimer:** Sports predictions are based on statistical analysis and historical data. Actual match outcomes can vary significantly due to unpredictable factors such as injuries, weather, referee decisions, and team motivation. These predictions should not be considered guarantees.';
+    // Only enforce sports-style disclaimer for sports/prediction questions.
+    // For platform/navigation questions, adding a "risk disclaimer" makes replies noisy.
+    const isSports = isSportsQuestion(userMessage, context);
+    if (isSports) {
+      const responseLower = aiResponse.toLowerCase();
+      const hasDisclaimer =
+        responseLower.includes('disclaimer') ||
+        responseLower.includes('risk') ||
+        responseLower.includes('guarantee');
+      if (!hasDisclaimer) {
+        aiResponse += '\n\n⚠️ **Risk Disclaimer:** Sports predictions are based on statistical analysis and historical data. Actual match outcomes can vary due to unpredictable factors (injuries, weather, referee decisions, motivation). These predictions are not guarantees.';
+      }
     }
     
     return aiResponse;
@@ -79,6 +82,65 @@ const generateAIResponse = async (userMessage, context = {}) => {
 };
 
 /**
+ * Determine whether the user is asking for sports analysis vs platform guidance
+ * (basic heuristic; the system prompt also guides behavior).
+ */
+const isSportsQuestion = (userMessage = '', context = {}) => {
+  if (context?.matchData) return true;
+  const msg = String(userMessage || '').toLowerCase();
+
+  // Platform/navigation terms (take precedence)
+  const platformTerms = [
+    'website',
+    'site',
+    'app',
+    'page',
+    'navigate',
+    'navigation',
+    'where is',
+    'how to use',
+    'how do i',
+    'login',
+    'sign up',
+    'signup',
+    'register',
+    'profile',
+    'settings',
+    'notifications',
+    'community',
+    'news',
+    'bulletin',
+    'live scores',
+    'live matches',
+    'admin',
+    'dashboard',
+  ];
+  if (platformTerms.some((t) => msg.includes(t))) return false;
+
+  // Sports/prediction terms
+  const sportsTerms = [
+    'who will win',
+    'prediction',
+    'predict',
+    'odds',
+    'over',
+    'under',
+    'btts',
+    'both teams to score',
+    'goal',
+    'goals',
+    'score',
+    'form',
+    'head to head',
+    'h2h',
+    'fixture',
+    'match id',
+    'vs ',
+  ];
+  return sportsTerms.some((t) => msg.includes(t));
+};
+
+/**
  * Build system prompt for AI
  * CRITICAL: Must ensure AI always provides explanation, confidence, and risk disclaimer
  */
@@ -87,7 +149,31 @@ const buildSystemPrompt = (context) => {
   const hasPredictions = !!(context.predictions && context.predictions.length > 0);
   const hasLimitedData = !hasMatchData || !hasPredictions;
   
-  return `You are an expert sports analyst AI assistant for OptikGoal, a sports prediction platform. Your role is to ANALYZE and EXPLAIN, not guess.
+  const platformGuide = buildPlatformGuideContext();
+
+  return `You are OptikGoal's AI Assistant.
+
+You have TWO jobs:
+1) **Platform Guide (primary for website/app questions):** Help users understand and navigate OptikGoal (pages, features, where to click, what things mean).
+2) **Sports Analyst (only for match/prediction questions):** Analyze matches and explain predictions using provided data.
+
+**ANTI-REPETITION (Important):**
+- Do NOT repeat the exact same answer verbatim if the user asks a similar question again.
+- If something was already explained, give a short recap (1–3 lines) and add new actionable details, or ask 1 clarifying question.
+
+**VIP POLICY (Important):**
+- Do NOT explain VIP/premium subscription details, pricing, plans, or VIP-only features.
+- If the user asks about VIP, politely say you can't help with VIP topics and redirect them to non‑VIP features/navigation.
+
+========================
+PLATFORM GUIDE CONTEXT
+========================
+${platformGuide}
+
+========================
+SPORTS ANALYSIS RULES
+========================
+You are an expert sports analyst AI assistant for OptikGoal, a sports prediction platform. Your role is to ANALYZE and EXPLAIN, not guess.
 
 **CRITICAL REQUIREMENTS - Your response MUST include:**
 
@@ -131,11 +217,61 @@ ${hasLimitedData ? '\n⚠️ WARNING: Limited data available - be explicit about
 };
 
 /**
+ * Static platform knowledge base to help the assistant answer website questions.
+ * Keep it concise and accurate; do not mention VIP features.
+ */
+const buildPlatformGuideContext = () => {
+  return `OptikGoal is a sports prediction + live scores web app.
+
+Navigation pages you can help with:
+- **Home**: Landing page with overview and an AI Assistant entry point. Also highlights live matches and key sections.
+- **Predictions**: Public predictions feed and match insights (general, non‑VIP).
+- **Bulletin**: Match bulletin / match board style page for browsing match info.
+- **Live Scores**: Live match scores for football and basketball.
+- **Community**: Community discussions/comments.
+- **News**: Sports/news articles feed.
+- **Profile / Settings / Notifications**: Account pages (may require login).
+- **Admin**: Admin login and admin dashboard (restricted).
+
+How to answer website questions:
+- Give short, step-by-step instructions: where to click in the navbar and what the user will see.
+- Explain what a feature does in plain language (no technical jargon).
+- If the user asks “where is X?”, answer with the exact nav item name (e.g., “Go to ‘Live Scores’ in the top menu.”)
+- If the user asks about match analysis without giving a match ID, ask them for the match ID or teams.`;
+};
+
+/**
  * Build user prompt with context
  * CRITICAL: Structure input as userQuestion + matchContext + predictionSummary
  */
 const buildUserPrompt = (userMessage, context) => {
   let prompt = `=== USER QUESTION ===\n${userMessage}\n\n`;
+
+  // Include a little recent chat so the model can avoid repeating itself.
+  if (Array.isArray(context.conversation) && context.conversation.length > 0) {
+    prompt += `=== RECENT CONVERSATION (for continuity; avoid repeating verbatim) ===\n`;
+    context.conversation.slice(-8).forEach((m) => {
+      const role = m.role === 'assistant' ? 'ASSISTANT' : 'USER';
+      prompt += `${role}: ${String(m.content || '').trim()}\n`;
+    });
+    prompt += `\n`;
+  }
+
+  // Platform context (always helpful for website Q&A)
+  if (context.platformContext || context.totalUsers || context.totalPredictions) {
+    prompt += `=== PLATFORM CONTEXT ===\n`;
+    if (context.platformContext) {
+      prompt += `${context.platformContext}\n`;
+    }
+    if (typeof context.totalUsers === 'number') prompt += `Total users: ${context.totalUsers}\n`;
+    if (typeof context.totalPredictions === 'number') prompt += `Total public predictions: ${context.totalPredictions}\n`;
+    if (typeof context.liveFootball === 'number' || typeof context.liveBasketball === 'number') {
+      const liveFootball = Number(context.liveFootball || 0);
+      const liveBasketball = Number(context.liveBasketball || 0);
+      prompt += `Live matches now: ${liveFootball + liveBasketball} (football: ${liveFootball}, basketball: ${liveBasketball})\n`;
+    }
+    prompt += `\n`;
+  }
 
   // Add match context if available
   if (context.matchData) {
@@ -159,8 +295,12 @@ const buildUserPrompt = (userMessage, context) => {
       prompt += `\n⚠️ Limited Statistics: No detailed statistics available for this match.\n`;
     }
   } else {
-    prompt += `=== MATCH CONTEXT ===\n`;
-    prompt += `⚠️ No specific match data provided - analysis will be general.\n`;
+    // For platform questions we don't need to inject noisy match placeholders.
+    // Only add this section if it seems like a sports/prediction question.
+    if (isSportsQuestion(userMessage, context)) {
+      prompt += `=== MATCH CONTEXT ===\n`;
+      prompt += `⚠️ No specific match data provided - analysis will be general.\n`;
+    }
   }
 
   // Add prediction summary if available
@@ -181,9 +321,12 @@ const buildUserPrompt = (userMessage, context) => {
     });
     prompt += `\nYour task: EXPLAIN these predictions in natural language. Why were these predictions made? What factors support them?\n`;
   } else {
-    prompt += `\n=== PREDICTION SUMMARY ===\n`;
-    prompt += `⚠️ No existing predictions found for this match.\n`;
-    prompt += `Your task: Generate analysis and predictions based on available match data.\n`;
+    // Only include prediction instructions for sports questions.
+    if (isSportsQuestion(userMessage, context)) {
+      prompt += `\n=== PREDICTION SUMMARY ===\n`;
+      prompt += `⚠️ No existing predictions found for this match.\n`;
+      prompt += `Your task: Generate analysis and predictions based on available match data.\n`;
+    }
   }
 
   // Add team statistics if available
@@ -200,15 +343,23 @@ const buildUserPrompt = (userMessage, context) => {
     prompt += `\n`;
   }
 
-  // Final instruction
+  // Final instruction (platform vs sports)
+  const sportsMode = isSportsQuestion(userMessage, context);
   prompt += `\n=== INSTRUCTIONS ===\n`;
-  prompt += `Based on the above data, provide a comprehensive analysis that:\n`;
-  prompt += `1. Answers the user's question clearly\n`;
-  prompt += `2. Explains your reasoning in detail (WHY, not just WHAT)\n`;
-  prompt += `3. Includes a confidence level (High/Moderate/Low with percentage)\n`;
-  prompt += `4. Includes a risk disclaimer (especially if data is limited)\n`;
-  prompt += `5. Uses natural, conversational language like a human sports analyst\n`;
-  prompt += `6. Is honest about uncertainty and data limitations\n`;
+  if (!sportsMode) {
+    prompt += `Answer as a helpful product guide for the OptikGoal website/app:\n`;
+    prompt += `- Be specific about where to click (nav item names)\n`;
+    prompt += `- Give short step-by-step instructions\n`;
+    prompt += `- Do NOT discuss VIP/premium features\n`;
+  } else {
+    prompt += `Based on the above data, provide a comprehensive sports analysis that:\n`;
+    prompt += `1. Answers the user's question clearly\n`;
+    prompt += `2. Explains your reasoning in detail (WHY, not just WHAT)\n`;
+    prompt += `3. Includes a confidence level (High/Moderate/Low with percentage)\n`;
+    prompt += `4. Includes a risk disclaimer (especially if data is limited)\n`;
+    prompt += `5. Uses natural, conversational language like a human sports analyst\n`;
+    prompt += `6. Is honest about uncertainty and data limitations\n`;
+  }
 
   return prompt;
 };
@@ -219,6 +370,37 @@ const buildUserPrompt = (userMessage, context) => {
  */
 const generateFallbackResponse = (userMessage, context) => {
   const lowerMessage = userMessage.toLowerCase();
+
+  // Platform/navigation queries (no VIP)
+  if (
+    lowerMessage.includes('website') ||
+    lowerMessage.includes('app') ||
+    lowerMessage.includes('page') ||
+    lowerMessage.includes('navigate') ||
+    lowerMessage.includes('where') ||
+    lowerMessage.includes('how') ||
+    lowerMessage.includes('login') ||
+    lowerMessage.includes('signup') ||
+    lowerMessage.includes('register') ||
+    lowerMessage.includes('live scores') ||
+    lowerMessage.includes('live matches') ||
+    lowerMessage.includes('bulletin') ||
+    lowerMessage.includes('community') ||
+    lowerMessage.includes('news') ||
+    lowerMessage.includes('predictions')
+  ) {
+    return `I can help you use OptikGoal (navigation + features).
+
+**Quick guide:**
+- Go to **Home** for the overview.
+- Use **Predictions** for the public predictions feed.
+- Use **Live Scores** to see live matches.
+- Use **Bulletin** to browse match info.
+- Use **Community** for discussions and comments.
+- Use **News** for articles.
+
+Tell me what you want to do (for example: “Where do I see live matches?” or “How do predictions work?”).`;
+  }
 
   // Match analysis queries
   if (lowerMessage.includes('win') || lowerMessage.includes('who will win') || lowerMessage.includes('prediction')) {
